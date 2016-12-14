@@ -1,0 +1,68 @@
+#!/usr/bin/perl -w
+# Simple event handler script for restarting service in case it is not-running
+# Accepts two params, the first is the name of service being checked
+# and the second is optional - log file path can be specified explicitly
+
+use strict;
+use Getopt::Long;
+use POSIX qw/strftime/;
+&Getopt::Long::config('bundling');
+
+# vars init
+my $state;
+my $service;
+my $logFile = "/icinga/eh_restart_service.log";
+my $logMsg = strftime('%Y-%m-%d %H:%M:%S', localtime);
+my $cmdResult;
+
+# startup options
+my $status = GetOptions(
+	"s|service=s"	  	=> \$service,
+	"l|log-file-path=s"	=> \$logFile,
+);
+
+# started with no options or without the service name
+if ($status == 0 or !$service) {
+	exit 3;
+} 
+$service = "/etc/init.d/$service";
+
+# get service status
+$state = executeCmd("$service status");
+
+if ($state == 3 || $state == 2 || $state == 1) {
+	# attempt to restart the service and log the action
+	$cmdResult = executeCmd("$service start");
+	$logMsg .= " Service \"$service\" restarted with a result of \"$cmdResult\"";
+} elsif ($state == 0) {
+	# log everything is OK
+	$logMsg .= " Event handler for \"$service\" executed, but the service is running OK";
+} else {
+	# log unknown exit code
+	$logMsg .= " Unknown service status code \"$state\".";
+}
+
+
+# catch potential problems with writing a reference file
+if (storeFileContents($logMsg, $logFile)){
+	exit 2;
+}
+print "OK";
+exit 0;
+
+# subroutine for saving string into file
+sub storeFileContents {
+	my $what = $_[0];
+	my $where = $_[1];
+
+	my $cmd = "echo '$what' >> $where";
+	$cmd = `$cmd`;
+	$cmd = $? >> 8;
+}
+
+# subroutine for executing cmds
+sub executeCmd {
+	my $cmd = $_[0];
+	$cmd = `$cmd`;
+	$cmd = $? >> 8;
+}
