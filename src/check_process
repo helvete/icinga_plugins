@@ -1,0 +1,72 @@
+#!/usr/bin/perl -w
+# simple wrapper plugin for charting ouptut of check_procs
+# for more details run ./<plugin-name> -h or read print_usage() sub
+# written 2013-02-05 by martin.peka@bugweis.com
+# please edit $plugin_path according to your environment
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+#path to plugins' directory
+my $plugin_path = "/usr/lib/nagios/plugins";
+my $exit_status;
+my $exit_code;
+my $warn;
+my $crit;
+my $opt_h;
+my @chunks;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+	('UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2');
+
+# startup options
+my $status = GetOptions(
+	"h|help"		=> \$opt_h,
+	"w|warn=s"		=> \$warn,
+	"c|crit=s"	=> \$crit
+);
+
+# started with no options or threshold levels - provide help:)
+if ( $status == 0 or !$warn or !$crit){
+	print_usage();
+} else {
+	# create query
+	my $exit_status = $plugin_path . "/check_procs -w $warn -c $crit";
+	# execute query and store result and resulting exit status
+	$exit_status = `$exit_status`;
+	$exit_code = $? >> 8;
+	# parse status
+	@chunks = split(' ', $exit_status);
+	# append perfdata
+	$exit_status .= " | procs=$chunks[2];$warn;$crit;0;\n";
+	# Bye
+	print $exit_status;
+	exit $exit_code;
+}
+# usage & help
+sub print_usage {
+	print <<EOU;
+	Usage: ./check_process -w <processes_count_to_warn> -c <processes_count_to_crit> [-h]
+
+This is a simple wrapper script to allow charting the output of otherwise
+sufficient "check_procs" plugin developed by nagios-plugins community.
+
+Wrapper plugin only parses status data and creates perfdata out of it.
+Works when only -w and -c parameters are supplied.
+
+
+	Options:
+
+	-h, --help
+	Get this help message
+	-w, --warn
+	Specify warn level
+	-c, --crit
+	Specify crit level
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+

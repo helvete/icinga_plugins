@@ -1,0 +1,147 @@
+#!/usr/bin/perl -w
+# This script checks sizes of multiple log files. Names of the log files
+# are to be defined in a file which name is supplied as a runtime parameter.
+# The file is also used to store log files size.
+
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+# asking for a help screen?
+my $opt_h;
+# source file reference
+my $sourcefile;
+# var. for storing file contents
+my $stream;
+# array for holding filename and filesize
+my @logs;
+# array for hodling changed log file names
+my @output;
+
+# startup options
+my $status = GetOptions(
+	"h|help"		=> \$opt_h,
+	"s|sourcefile=s"	  => \$sourcefile
+);
+# started with no options or without source file -> get help
+if ( $status == 0 or !$sourcefile or $opt_h) {
+	print_usage();
+	exit 3;
+} else {
+	# does source file exist?
+	unless (-e $sourcefile) {
+		print "Error: $sourcefile file does not exist!\n";
+		exit 3;
+	}
+	# read the whole file
+	$stream = "cat $sourcefile";
+	$stream = `$stream`;
+
+	# store path and size of individual files
+	@logs = split /\n/, $stream;
+	for my $value (@logs){
+		my @parts = split / /, $value;
+		# log file name defined in sourcefile does not exist
+		unless (-e $parts[0]) {
+			print "Note: $parts[0] log file doesn't exist!\n";
+		#	exit 2;
+			next;
+		}
+		# get file size
+		my $fileSize = get_size($parts[0]);
+		# unless the size is saved from previous time or the size is 0
+		unless($parts[1]){
+			# locally turn off warnings
+			local $^W = 0;
+			# test whether the value is '0' or ''
+			unless($parts[1] == 0 && $parts[1] ne ''){
+				# if it is '' then save its size..
+				$parts[1] = $fileSize;
+				$value = join(' ', @parts);
+				# .. and loop forward
+				next;
+			}
+		}
+		# if the logfile is bigger than in previous check
+		if($parts[1] < $fileSize){
+			# save its name
+			push (@output, $parts[0]);
+		}
+		# if the logfile is smaller than in previous check
+		if($parts[1] > $fileSize){
+			# then look for rotated log file
+			my $rotated = $parts[0] . ".1";
+			if (-e $rotated){
+				# if there is one and if it is bigger than the
+				# saved value
+				if ($parts[1] < get_size($rotated)){
+					# save its name
+					push (@output, $rotated);
+				}
+			}
+		}
+		# finally save current sizes
+		$parts[1] = $fileSize;
+		$value = join(' ', @parts);
+
+	}
+	# write new sourcefile contents
+	$stream = join('\n', @logs);
+	my $writer = "echo '$stream' > $sourcefile";
+	$writer = `$writer`;
+	$status = $? >> 8;
+	# catch potential problems with writing a file
+	if ($status){
+		print "ERROR: Problem writing the sourcefile!: ". $writer."\n";
+		exit 2
+	}
+	# decide outcome - status text and exit code
+	if(@output == 0){
+		$stream = "OK";
+		$writer = 0;
+		print $stream .", Log files remain unchanged. | files_changed=0;;;0;\n";
+	}else{
+		$stream = "WARNING";
+		$writer = 1;
+		print $stream .", The sizes of log files have been increased. Check files:\n". join(',\n', @output) ." | files_changed=".scalar(@output).";;;0;\n";
+	}
+
+	# peacefully terminate the script
+	exit $writer;
+}
+
+# sub-routine to get current file size
+sub get_size {
+	my $return = "stat -c %s $_[0]";
+	$return = `$return`;
+	chomp($return);
+	$return .="";
+}
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+	Usage: ./check_logs_multi -s <path-to-sourcefile> [-h]
+
+ This script checks sizes of multiple log files. Names of the log files
+ are to be defined in a file which name is supplied as a runtime parameter.
+ The file is also used to store log files size. The initial sizes need not
+ to be filled in - the plugin fills them automatically in at the first run.
+ Plugin assumes the rotated logfile name to be in "<filename>.1" format.
+
+	Options:
+
+	-s, --sourcefile
+	Path to the file containing log file names (incl. path) to check.
+	Fill one file definition per line.
+	-h, --help
+	Get this help message
+
+EOU
+
+	exit 3;
+}
+
+

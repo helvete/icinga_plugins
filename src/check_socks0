@@ -1,0 +1,203 @@
+#!/usr/bin/perl -w
+# plugin to check socks5 proxy using curl
+# IP and port of the proxy are hardcoded
+# in the query, feel free to change it
+# v0.1 2013-03-07 martin.peka@bugweis.com
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $sshLogin;
+my $path;
+my $query;
+my $limit=5;
+my @fileLines;
+my $verbose;
+my $warn = 20;
+my $crit = 10;
+my $proxy;
+my $port;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+  ( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"        => \$opt_h,
+	"l|limit=i"     => \$limit,
+	"p|pathtemp=s"	=> \$path,
+	"w|warn=i"      => \$warn,
+	"c|crit=i"      => \$crit,
+	"v|verbose"	=> \$verbose,
+	"x|proxyip=s"	=> \$proxy,
+	"r|proxyport=s"	=> \$port
+);
+
+# started with no options or without temp file path -> get help
+if ( $status == 0 or !$path or $opt_h or !$proxy or !$port) {
+	print_usage();
+	exit $STATUS_CODE{'OK'};
+}else{
+	# directory path doesn't exist, hence creating it 
+	unless (-e $path) { 
+		my @tree = split /\//, $path;
+		my $inc = "";
+		my $create;
+		foreach my $value (@tree){
+			unless(-e $inc.$value||$value eq ""){
+				$create = `mkdir $inc$value`;
+			}
+			$inc .= $value."/";
+		}
+	};
+	# create the file identifier from directory and file name
+	$path .= "iprotate";
+	# create the file at first run
+	unless (-e $path) {
+		my $response = `touch $path`;
+	} 
+}
+
+# assemble query
+$query = "curl -s --socks5 $proxy:$port www.calman.eu/showip.php";
+# execute query and save its output
+$query = `$query`;
+
+if($verbose){
+	line();
+	print "Curl query output:\n";
+	print $query . "\n";
+	line();
+}
+
+# parse the output
+my @parsedOutput = split / /, $query;
+# open file to read
+open FILE, "<", $path or die $!;
+# save the lines contents
+@fileLines = <FILE>;
+# close it
+close FILE;
+# get lines count
+my $fileLinesCount = @fileLines;
+
+if($verbose){
+	print "IPs read from tempfile:\n";
+	for (my $i = 0; $i < $fileLinesCount; $i++){
+		print $fileLines[$i];
+	}
+	line();
+}
+
+# if there is less records in the file than minimal limit
+# only save new ones and exit.
+if($fileLinesCount < $limit){
+	# open file for appending
+	open FILE, ">>", $path or die $!;
+	# append newly acquired IP
+	print FILE $parsedOutput[3]."\n";
+	# close it
+	close FILE;
+	# print status & exit
+	print "Gathering data.. Pool size set to $limit, but having $fileLinesCount IPs so far.\n";
+	exit $STATUS_CODE{'UNKNOWN'};
+}else{
+	# keep the last $limit-1 array fields and get rid of the others
+	splice(@fileLines,0, -($limit-1));
+	# add newly acquired IP to the end of an array
+	unless(defined $parsedOutput[3]){
+		print "Problem with parsing curl ouptut\n";
+		exit $STATUS_CODE{'UNKNOWN'};
+	}	
+	push(@fileLines, $parsedOutput[3]."\n");
+	# open file for simple writing
+	open FILE, ">", $path or die $!;
+	# print out the entire array
+	print FILE @fileLines;
+	# close it
+	close FILE;
+
+	if($verbose){
+		print "IPs written to tempfile:\n";
+		for (my $i = 0; $i < $#fileLines+1; $i++){
+			print $fileLines[$i];
+		}
+	}
+	# get a count of unique IPs within the pool
+	my $unique = getUniqCount(@fileLines);
+
+	if($verbose){
+		line();
+		print "Unique IPs count within the pool: $unique\n";
+	}
+
+	# get uniqueness percentage of IPs
+	my $uniqueState = int($unique / ($limit/100));
+	# compare it with thresholds
+	if ($uniqueState < $crit){
+		print "CRITICAL: only $uniqueState\% unique IPs in last $limit attempts! | Percent_different=$uniqueState;$warn;$crit;0;100\n";
+		exit $STATUS_CODE{'CRITICAL'};
+	}else{
+		if($uniqueState < $warn){
+			print "WARNING: only $uniqueState\% unique IPs in last $limit attempts! | Percent_different=$uniqueState;$warn;$crit;0;100\n";
+			exit $STATUS_CODE{'WARNING'};
+		}else{
+			print "OK: $uniqueState\% unique IPs in last $limit attempts | Percent_different=$uniqueState;$warn;$crit;0;100\n";
+			exit $STATUS_CODE{'OK'};
+		}
+
+	}
+}
+
+exit $STATUS_CODE{'UNKNOWN'};
+
+# function for comparing IPs
+sub getUniqCount {
+	my %hash  = map { $_, 1 } @_;
+	my $size = keys %hash;
+}
+# function for drawing a line in verbose mode
+sub line{
+	print "-----------------------\n";
+}
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+Usage: ./check_socks [-w 30] [-c 15] [-l 20] -p /tmp/ -x 127.0.0.1 -p 999 [-h][-v]
+
+Plugin runs a curl query through a socks5 proxy to a "say-me-my-IP" site. 
+The page is then parsed for this IP. At few first runs (few = --limit) plugin
+doesn't return state, but creates a pool of IP addresses. At later runs, 
+uniqueness of the IPs is checked and compared against thresholds.
+
+    Options:
+    -w, --warn
+	Set warning threshold in percents of minimal IP uniqueness (-w 20 mean
+	LESS than 20 unique IPs in pool from 100 ones overall); default = 20
+    -c, --crit
+	Set critical threshold in percents of minimal IP uniqueness (-c 10 mean
+	LESS than 10 unique IPs in pool from 100 ones overall); default = 10
+    -p, --path
+	Directory path to temporary file location
+    -l, --limit
+	IP pool size; default = 5
+    -h, --help
+	Get this help message
+    -v, --verbose
+	Get more verbose plugin output
+    -x, --proxyip
+	SOCKS5 proxy IP address
+    -r, --proxyport
+	SOCKS5 proxy port
+
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+

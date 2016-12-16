@@ -1,0 +1,176 @@
+#!/usr/bin/perl -w
+# http://www.dnsbl.info/  checking plugin
+# checks for a listed IP address within
+# databases of spammer IPs.
+# Execute w/out parameter or with -h or --help
+# to get basic usage help
+#
+# written by martinpeka@bugweis.com 2013-01-28
+# version 0.11 added -p parameter and changed
+#   execution sequence a bit to work flawlessly
+#   when called by nagios/icinga;
+#   whole script also commented (2013-01-30)
+#   and added timeout warning
+# version 0.111 minor bugfixes to handle parsed
+#   site timeouts to avoid parse errors and OK
+#   status return (2012-02-08)
+
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $host_name;
+my $pluginPath;
+my @arr;
+my @addresses;
+my $exitstatus;
+my @splitLine;
+my $value;
+my $outputStatusString;
+my $banLocation;
+my $q1;
+my $q2;
+my $q3;
+my $q4;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+  ( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"        => \$opt_h,
+	"H|hostname=s"   => \$host_name,
+	"p|path=s"	=> \$pluginPath
+);
+
+# At first, fresh token is needed (the query doesn't work with old one),
+# hence loading whole page to parse
+my $token = `wget -qO- --user-agent "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:19.0) Gecko/20100101 Firefox/19.0" http://www.dnsbl.info/dnsbl-database-check.php`;
+#
+# temporary array to store data in
+@arr = split /token/, $token;
+# table with results stored in $table[1]
+my @table = split /TABLE/, $token;
+# catching problems when site is not returned
+if( 0+@table > 1 ){
+	# split around link's close tag to get inner HTML - raw URL of a blacklist
+	@addresses = split /<\/A>/, $table[1];
+}else{
+	print "There is no table on provided site. Bad URL, Site redesigned or just timed out?\n";
+	exit $STATUS_CODE{'UNKNOWN'};
+}
+# final part to filter link's open tag and so on (in each link statement)
+foreach $value (@addresses){
+	@splitLine =  split /'>/, $value;
+	$value = $splitLine[3];
+}
+# taking care about the token thing again
+# catching problems when site is not returned
+if( 0+@arr < 2 ){
+	print "There are no tokens on provided site. Bad URL, Site redesigned or just timed out?\n";
+	exit $STATUS_CODE{'UNKNOWN'};
+}
+$token = $arr[1];
+@arr = split /'/, $token;
+$token = $arr[0];
+substr $token, 0, 1, "";
+
+
+# started with no options or without a hostname - provide help:)
+if ( $status == 0 or !$host_name or !$pluginPath) {
+	print_usage();
+	exit $STATUS_CODE{'OK'};
+} else {
+# and if the IP to look for is given, it's needed to check all blacklist
+# databases for a record
+
+	# plugin and API query "chunks" - to be filled with variable data
+	$q1 = $pluginPath . "check_http -H www.dnsbl.info -t 10 -v -A \"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:19.0) Gecko/20100101 Firefox/19.0\" -u \"http://www.dnsbl.info/test4.php?bl=";
+        $q2 = "&ip=";
+        $q3 = "&token=";
+        $q4 = "\"";
+
+	foreach $value (@addresses){
+		if (defined $value){
+			if(getStatus($value) ne "OK"){
+				$exitstatus = "CRITICAL";
+				# generating some output data
+				$outputStatusString = "BAN CHECK CRITICAL: ban detected at least at $banLocation";
+				last;
+			}else{
+				$exitstatus = "OK";
+				# generating some output data
+				$outputStatusString = "BAN CHECK OK: no bans detected";
+			}
+		}
+	}
+
+	# printing out the output string and exiting script
+	print $outputStatusString . "\n";
+	exit( $STATUS_CODE{$exitstatus} );
+}
+
+# gets individual blacklist's opinion on tested IP
+sub getStatus{
+	# complete the query
+	my $query = $q1 . $_[0] . $q2 . $host_name . $q3 . $token . $q4;
+	# execute it and save the output
+	$query = `$query`;
+
+	my @kidsregex = split /ball_red/, $query;
+	if (@kidsregex == 0 or @kidsregex == 1) {
+		$exitstatus = 0;
+	}else{
+		$exitstatus = 1;
+	}
+
+	# redirect the exit code
+
+	my @pluginOutput = split / /, $query;
+
+	unless($pluginOutput[3] ne "timeout"){
+		$exitstatus = 0;
+	}
+
+	if($exitstatus == 0){
+		$exitstatus = "OK";
+	}else{
+		# saving the name of blacklist which banned tested IP address
+		$banLocation = $_[0];
+		$exitstatus = "CRITICAL";
+	}
+}
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+    Usage: ./check_ban_dnsbl -H <hostname> -p <pathToHttpPlugin> [-h]
+
+This plugin calls official check_http plugin multiple-times, to test whether
+is tested server banned on DNSbl's queried blacklists.
+
+Note: if problem occurs, this plugin does raise critical state immediately;
+raising warning state before seems pointless.
+
+Note 2: There is a lot of servers to query, so the execution time can
+take quite a while (cca 1,5 minute). Maybe your default plugin timeout in
+icinga.cfg/nagios.cfg needs to get raised.
+
+    Options:
+
+    -H, --hostname
+        Hostname to test on DNSbl whether is banned or not
+    -h, --help
+	Get this help message
+    -p, --path
+	Specify path to check_http plugin
+
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+

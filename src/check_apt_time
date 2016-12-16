@@ -1,0 +1,210 @@
+#!/usr/bin/perl -w
+# plugin for checking available packages w/ threshold settings according
+# to time spent in a state of some packages available
+# preliminary demonstrational version 2014-05-14
+# clarifiacion and streamlining ver. 2014-05-28
+
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+# asking for a help screen?
+my $opt_h;
+# source file reference
+my $sourcefile;
+# stores time needed for security updates to be alerted as critical
+my $warningTime;
+# stores time needed for security updates to be alerted as warning
+my $criticalTime;
+# current timestamp
+my $currentTime;
+# var. for storing file contents
+my $stream;
+# apt state
+my $aptState;
+# array for holding data from file
+my @fileData;
+# array for holding data from apt
+my @aptData;
+# result array
+my @output;
+# prefix the displayed text will start with
+my $prefix;
+
+# startup options
+my $status = GetOptions(
+	"h|help"		=> \$opt_h,
+	"s|sourcefile=s"	  => \$sourcefile,
+	"w|warningtime=i"	=> \$warningTime,
+	"c|criticaltime=i"	=> \$criticalTime
+);
+# started with no options or without the necessary ones
+if ( $status == 0 or !$sourcefile or $opt_h) {
+	print_usage();
+	exit 3;
+} else {
+
+	$currentTime = time;
+
+	# does source file exist?
+	unless (-e $sourcefile) {
+		if (storeFileContents("0;0;$currentTime", $sourcefile) == 0) {
+			print "Sourcefile $sourcefile was missing, therefore has been created.\n";
+			exit 0;
+		} else {
+			print "Attempt to create sourcefile $sourcefile failed! Manual intervention needed.\n";
+			exit 3;
+		}
+	}
+
+	# zero the thresholds if none supplied
+	$criticalTime = 0 unless defined $criticalTime;
+	$warningTime = 0 unless defined $warningTime;
+
+	######################## retrieve necessary data ########################
+
+	# from log
+	$stream = "cat $sourcefile";
+	$stream = `$stream`;
+
+	# from apt-check
+	$aptState = "/usr/lib/update-notifier/apt-check";
+	$aptState = `/bin/bash -c \"$aptState\" 2>&1`;
+
+	my $outcome = $? >> 8;
+	if ($outcome != 0) {
+		print "FATAL ERROR: '/usr/lib/update-notifier/apt-check' utility not present on current system!";
+		exit 3
+	}
+
+	# parse them into arrays
+	@fileData = split /\;/, $stream;
+	@aptData = split /\;/, $aptState;
+
+	######################## determination logic start ########################
+
+	# 0/ presume OK for starters
+	$output[0] = 0;
+	$output[1] = 'No packages to update available';
+	$prefix = "OK: ";
+
+	# 1/ warnings - nonsecurity
+	if ($aptData[0] > 0) {
+		$output[1] = $aptData[0] . " non-security packages available";
+
+		if ($fileData[0] > 0) {
+			if (thresholdCrossed($warningTime)) {
+				$output[0] = 1;
+				$prefix = "WARNING: ";
+			}
+			# recycle previous check's timestamp if no change ocurred
+			$currentTime = $fileData[2];
+		}
+		if ($warningTime == 0) {
+			$output[0] = 1;
+			$prefix = "WARNING: ";
+		}
+	}
+	# 2/ criticals - security
+	if ($aptData[1] > 0) {
+		$output[1] = "" unless defined $output[1];
+		$output[1] = $aptData[1] . " security packages, " . $output[1];
+
+		if ($fileData[1] > 0) {
+			if (thresholdCrossed($criticalTime)) {
+				$output[0] = 2;
+				$prefix = "CRITICAL: ";
+			}
+			# recycle previous check's timestamp if no change ocurred
+			$currentTime = $fileData[2];
+		}
+		if ($criticalTime == 0) {
+			$output[0] = 2;
+			$prefix = "CRITICAL: ";
+		}
+	}
+
+	######################## determination logic end ########################
+
+	# add performance data
+	$output[1] = $prefix . $output[1] . "| non-sec="
+		. $aptData[0] . ";1;5000;0 sec="
+		. $aptData[1] . ";5000;1;0\n";
+
+	# write new sourcefile contents
+	$stream = $aptData[0] . ';' . $aptData[1] . ';' . $currentTime;
+	chomp $stream;
+
+	# catch potential problems with writing a reference file
+	if (storeFileContents($stream, $sourcefile)){
+		print "ERROR: Problem writing the sourcefile!: ". $sourcefile."\n";
+		exit 3
+	}
+
+	# print statuses & performance data
+	print $output[1];
+
+	# peacefully terminate the script
+	exit $output[0];
+}
+
+# subroutine checks whether the time threshold has been trespassed
+sub thresholdCrossed {
+	my $return = ($currentTime - $_[0]) > $fileData[2]
+		? 1
+		: 0;
+}
+
+# subroutine for saving new / updated sourcefile
+sub storeFileContents {
+	my $what = $_[0];
+	my $where = $_[1];
+
+	my $cmd = "echo '$what' > $where";
+	$cmd = `$cmd`;
+	$cmd = $? >> 8;
+}
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+	Usage: ./check_apt_time -s <path-to-sourcefile> [-h] [-w <sec>] [-c <sec>]
+
+ This script checks available updates via '/usr/lib/update-notifier/apt-check'.
+	It has also options for setting time thresholds. This means:
+
+	By stating [-w 2592000] parameter the plugin recognises non-security
+	packages as WARNING threshold trespassers *after* they are available
+	more than 30 days.
+
+	Similarly by stating [-c 2592000] the plugin does the same for security
+	packages before they fall to CRITICAL state. NOT RECOMMENDED TO USE!
+
+	At first run, source file creation is attempted and OK status is
+	returned if successful.
+
+	The time periods are to be specified in seconds.
+
+	Options:
+
+	-s, --sourcefile
+	Path to the file containing log. Data from previous checks are stored there.
+
+	-h, --help
+	Get this help message
+
+	-w, --warningtime
+	Time in seconds needed for warning threshold trespassing. State 0 or omit
+		the parameter for immediate validity
+
+	-c, --criticaltime
+	Time in seconds needed for critical threshold trespassing. State 0 or omit
+		the parameter for immediate validity
+EOU
+
+	exit 0;
+}
+
+

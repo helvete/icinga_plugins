@@ -1,0 +1,172 @@
+#!/usr/bin/perl -w
+# Plugin gets files through sftp and checks them for changes. If the checked 
+# file is changed, the plugin will raise a WARNING state and stores the
+# new file version for a future reference (while keeping the original one
+# to allow changes tracking).
+# version 0.9 2013-02-18 by martinpeka@bugweis.com - initial version to 
+# check config file intactness
+# version 0.95 2013-03-04 added sftp connection, directory creating
+# version 0.96 2013-03-04 sftp command line rewritten to be more universal
+# and usable by Icinga automated execution (w/out user's home and .ssh config)
+# 2013-04-02 support for log exclusion
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $sshLogin;
+my $path;
+my @exclude;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+  ( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"        => \$opt_h,
+	"s|sshlogin=s"      => \$sshLogin,
+	"p|referncepath=s"	=> \$path,
+	"e|exclude=s"	=> \@exclude
+);
+
+# started with no options or without ssh resource or temp files path -> get help
+if ( $status == 0 or !$path or !$sshLogin) {
+	print_usage();
+	exit $STATUS_CODE{'OK'};
+}
+else {
+	# directory path doesn't exist, hence creating it 
+	unless (-e $path) { 
+		my @tree = split /\//, $path;
+		my $inc = "";
+		my $create;
+		foreach my $value (@tree){
+			unless(-e $inc.$value||$value eq ""){
+				$create = `mkdir $inc$value`;
+			}
+			$inc .= $value."/";
+		}
+	};
+	# download files and save its names
+	my @fileNames = getFiles();
+
+	foreach my $value (@fileNames){
+	# creating reference files' name
+	my $refFile = $value.".ref";
+		# is target(reference) file existing?
+		unless (-e $refFile) {
+			# catching errors while copying the source file into a target one
+			unless(duplicator($value, $refFile) == 0){
+				print "Error: $value file cannot be copied into $refFile.\n";
+				exit( $STATUS_CODE{"CRITICAL"} );
+			}
+		}
+		# if the two files differ, backup the old reference, store a new one and raise a warning alert
+		my $filesDiff = compareFiles($value, $refFile);
+		my @statusLines = split /\n/, $filesDiff;
+		#foreach my $value (@statusLines){
+		#	print $value."\n";
+		#}
+		unless (length($filesDiff) == 0){
+			my $oldRef = $refFile .".". time;
+			unless (duplicator($refFile, $oldRef) == 0){
+				print "Error: The old reference file cannot be backed up!\n";
+				exit( $STATUS_CODE{"CRITICAL"} );
+			}
+			unless (duplicator($value, $refFile) == 0){
+				print "Error: The new reference file cannot be established!\n";
+				exit( $STATUS_CODE{"CRITICAL"} );
+			}
+			
+			print "WARNING: At least $value file differs from its reference copy! diff: ". $statusLines[1] || " " . $statusLines[2] || " " . $statusLines[3] || "" . "...\n";
+			exit( $STATUS_CODE{"WARNING"} );
+		}
+	}
+		# otherwise they are identical
+		print "Check OK: the log files and its reference copies are identical.\n";
+		exit( $STATUS_CODE{"OK"} );
+}
+# function for copying files
+sub duplicator {
+	# create a reference copy..
+	my $status = "cp " . $_[0] . " " . $_[1] ." 2>/dev/null";
+	$status = `$status`;
+        # redirect the exit code
+        $status = $? >> 8;
+}
+# function for comparing files
+sub compareFiles {
+	# are the files identical? 
+	my $status = "diff " . $_[0] . " " . $_[1];
+	$status = `$status`;
+}
+# function for downloading files through sftp and storing its names
+sub getFiles {
+	my $command = "sftp -b - -P 2201 -i /var/lib/nagios/id_dsa_eon2 $sshLogin\@eon01.fg.cz <<<'mget /log/*.* $path/'";
+	my $getFiles = `/bin/bash -c \"$command\"`;# 2>/dev/null
+        my $status = $? >> 8;
+	unless ($status == 0){
+		print "Error: Connection cannot be established!\n$getFiles";
+		exit( $STATUS_CODE{"CRITICAL"} );
+	}
+	# retrieve file names with paths from sftp ouptut
+	my @words = split /\n/, $getFiles;
+	shift(@words);# first line is just information about where to connect
+	my @returnArray;
+	my @temporaryArray;
+	foreach my $excl (@exclude){
+		$excl = $path ."/". $excl;
+	}
+my $flag;
+	# logs excluded from processing
+	foreach my $value (@words){
+		@temporaryArray = split / /, $value;
+		if(@exclude){#and ($value ~~ @exclude)
+			$flag = 0;
+			foreach my $excl (@exclude){
+				unless($temporaryArray[3] ne $excl){
+					$flag = 1;	
+					#print $temporaryArray[3]. "  ".$excl."\n";
+				}
+			}
+			unless($flag > 0) {
+				push(@returnArray, $temporaryArray[3]);
+			}
+		}else{
+			push(@returnArray, $temporaryArray[3]);
+		}
+	}
+	return @returnArray;
+}
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+    Usage: ./check_config -s <sftp server login> -p <path-to-reference/backup files> [-h]
+
+Plugin downloads files from specified sftp resource and then checks them 
+for changes. At first run, source (checked) file is copied into target 
+(reference) file. At later runs, both files are compared using `diff` utility. 
+Plugin returns OK if the files are identical or WARNING if the files differ
+while saving the new source as current reference and backing up the old copy. 
+Timestamp of the time when change is detected is appended to a filename 
+of the backup copy.
+
+    Options:
+
+    -s, --sshlogin
+	ssh/sftp login to connect to server resource
+    -p, --referencepath
+	Path to the files to be used as a reference. The directory is also used
+	as a location for the backup copies.
+    -h, --help
+	Get this help message
+
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+

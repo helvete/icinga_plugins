@@ -1,0 +1,113 @@
+#!/usr/bin/perl -w
+# plugin for checking wedos outages from twitter feed
+# version 0.2 / 2015-07-29
+# supply -h param to get help
+
+use strict;
+use Scalar::Util qw(looks_like_number);
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+# input options
+my $opt_h;
+my $url;
+
+# output string parts, exit code controller
+my $output = "OK";
+my $message = '';
+my $perf = '| tweets=';
+
+# parser helper vars
+my $pageContents;
+my @chunks;
+
+# tweets holder array
+my @tweets;
+# outage pattern
+my $pattern = 'Vyskytl se problém';
+
+# status code definition hash for exitcode purposes
+my %STATUS_CODE =
+  ( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"        => \$opt_h,
+	"u|url=s"	=> \$url,
+);
+
+# started with help request param
+if ( $opt_h || ! defined $url) {
+	print_usage();
+	exit $STATUS_CODE{'UNKNOWN'};
+}
+
+# grab page contents
+$pageContents = getResponse($url);
+
+# divide it by twitter posts
+@chunks = split /p class=\"TweetTextSize/, $pageContents;
+
+# cut off irrelevant page markup
+my $iter = 0;
+foreach my $item (@chunks) {
+	if ($iter != 0) {
+		my @temp = split /<\/p>\n/, $item;
+		$item = $temp[0];
+		@temp = split /data-aria-label-part="0">/, $item;
+		push @tweets, $temp[1];
+	}
+	$iter++;
+}
+
+# in case there are some twitter posts...
+if (scalar @tweets > 0) {
+	$message = $tweets[0];
+	$perf .= (scalar @tweets) . ';;;0;';
+	# outage found
+	if ($tweets[0] =~ m/$pattern/) {
+		$output = 'WARNING';
+	} else {
+		$output = 'OK';
+	}
+} else {
+	$output = 'OK';
+	$message = 'No twitter posts within outage feed.';
+	$perf .= '0;;;0;';
+}
+
+# print icinga status data
+print "$output: $message$perf\n";
+
+# and terminate with correct response
+exit( $STATUS_CODE{$output} );
+
+# function to fetch single IP address
+sub getResponse {
+	# assemble query
+	my $query = "wget -qO - \'". $url . "\'";
+	# execute query and save its output
+	$query = `$query`;
+}
+
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+Usage: ./check_wedos_twitter_feed -u <target-twitter-page-URL>
+
+Plugin scrapes target URL for twitter posts. Then it attempts to match problem
+regex pattern ($pattern) within last twitter post. If found, WARNING state
+is raised. Last twitter post content is always returned as a part of status data.
+Twitter posts count is returned via performance data.
+
+    Options:
+    -h, --help
+	Get this help message
+    -u, --url
+	URL to query
+
+EOU
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}

@@ -1,0 +1,265 @@
+#!/usr/bin/perl -w
+# plugin to check unfinished scans count using Jaybird API. More on how
+# it works can be found using -h flag
+# feel free to change it
+use strict;
+use Scalar::Util qw(looks_like_number);
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $query;
+my @warn;
+my @crit;
+my @time;
+my $verbose;
+my $host;
+my $data;
+my $output = "OK";
+my $max;
+my $url;
+my $exact;
+my $itemName;
+my $itemNameP;
+my $before;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+	( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"	=> \$opt_h,
+	"v|verbose"	=> \$verbose,
+	"w|warn=s@"	=> \@warn,
+	"c|crit=s@"	=> \@crit,
+	"t|time=s@"	=> \@time,
+	"u|url=s"	=> \$url,
+	"x|exactnum"=> \$exact,
+	"i|iname=s"	=> \$itemName,
+);
+
+# started with no options or without temp file path -> get help
+if ( $opt_h ) {
+	print_usage();
+	exit $STATUS_CODE{'UNKNOWN'};
+}
+
+# handle items name
+if(!$itemName){
+	$itemName = 'item';
+}
+$itemNameP = $itemName . 's';
+$itemName .= '(s)';
+
+# get current time - from monitoring machine
+my @testa = gmtime(time);
+my $hours = $testa[2];
+if($verbose){
+	print "hours: ".$hours.", item name: $itemName, ";
+}
+
+if ($#warn == $#crit and $#crit == 0 and $#time < 0) {
+	$before = 1;
+	$time[0] = 1;
+}
+
+# store length of input arrays - we need to know for the cutting's purposes
+my @length = ($#warn, $#crit, $#time);
+
+# normalize the input data - if there is more thresholds defined, then every one
+# should include warning, critical and time values.
+unless($length[0] == $length[1] and $length[0] == $length[2]){
+	$max = $length[0] <= $length[1] ? $length[1]: $length[0];
+	$max = $max <= $length[2] ? $length[2]: $max;
+	for(my $i=$max; $i > -1; $i--){
+		if (defined($warn[$i]) and defined($crit[$i]) and defined($time[$i])){
+			next;
+		}else{
+			if(defined($warn[$i])){
+				pop(@warn);
+			}
+			if(defined($crit[$i])){
+				pop(@crit);
+			}
+			if(defined($time[$i])){
+				pop(@time);
+			}
+		}
+	}
+}
+# get the thresholds count (last index)
+$max = $#warn;
+if ($verbose){
+	print "[Last indices] max: $max, warn: $#warn, crit: $#crit, time: $#time\n\n";
+}
+# get the response from API and parse it if exact match not requested
+$data = getResponse();
+if (!$exact){
+	$data = easyParser($data);
+}
+unless (looks_like_number($data)){
+	print "UNKNOWN: Cannot fetch or parse the input data!\n";
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+# this array will store threshold's index on position of its time
+my @timeData;
+# prefilling the array with -1s to make comparison easier
+for(my $i = 0; $i < 24; $i++){
+	$timeData[$i] = -1;
+	if($verbose and ($#warn > -1)){
+		if(($i+1) > 9){
+			print " " . ($i+1);
+		}else{
+			print " 0" . ($i+1);
+		}
+	}
+}
+# filling in the indexes of all thresholds
+for(my $i=$max;$i >= 0;$i--){
+	if($time[$i]){
+		$timeData[$time[$i]-1]= $i;
+	}
+}
+# position will store the index of chosen threshold
+my $position;
+# flag indicating whether the index was found or not
+my $found = 0;
+# trying to find the desired threshold the right way - should be greater
+for(my $i = $hours; $i < 24; $i++){
+	if($timeData[$i] > -1){
+		$position = $timeData[$i];
+		$found = 1;
+		last;
+	}
+}
+# if there is no threshold greater than $hours, try to locate some lower
+unless ($found){
+	for(my $i = 0; $i <= $hours; $i++){
+		if($timeData[$i] > -1){
+			$position = $timeData[$i];
+			$found = 1;
+			last;
+		}
+	}
+}
+# block that visualises the set thresholds in verbose mode
+if($verbose and ($#warn > -1)){
+	print "\n";
+	for(my $i = 0; $i < 24; $i++){
+		if (($i+1) == $time[$position]){
+			print " \^ ";
+		}
+		elsif($timeData[$i] > -1){
+			print " \| ";
+		}else{
+			print "   ";
+		}
+	}
+	print "\n";
+}
+
+# checking thresholds to get status (only when found some)
+if($found){
+	if($data > $crit[$position]){
+		$output = "CRITICAL";
+	}
+	if($data < $crit[$position] and $data > $warn[$position]){
+		$output = "WARNING";
+	}
+
+	if($data < $warn[$position] and $data < $crit[$position]){
+		$output = "OK";
+	}
+	if ($verbose){
+		print "Selected thresholds: t=". $time[$position] ." w=".  $warn[$position] ." c=".  $crit[$position]."\n";
+	}
+	# don't outpout 'before X hour' string if only one threshold set for whole day
+	if ($before) {
+		undef($time[0]);
+	}
+	if ($#time == 0) {
+		$before = '';
+	} else {
+		$before = "before $time[$position] hours GMT ";
+	}
+	# print the status out
+	print "$output: $data $itemName $before| $itemNameP=$data;$warn[$position];$crit[$position];;\n";
+}else{
+	# print the status out
+	$output = "OK";
+	print "$output: $data $itemName | $itemNameP=$data;;;;\n";
+}
+
+# and terminate
+exit( $STATUS_CODE{$output} );
+
+# easy (no nested levels) JSON parser subroutine,
+# parses correctly value from JSON payload like this {"node": "value"}
+sub easyParser{
+	my @arry = split /:/, $_[0];
+	@arry = split /\"/, $arry[1];
+	my $return = $arry[1];
+}
+
+# convenient debug subroutine
+sub puke{
+	foreach my $option (@_){
+		print $option . "\n";
+	}
+}
+
+# subroutine to fetch single IP address
+sub getResponse{
+	# assemble query
+	$query = "wget -qO - \'". $url . "\'";
+	# execute query and save its output
+	$query = `$query`;
+}
+
+
+# print help
+sub print_usage {
+	print <<EOU;
+
+Usage: ./check_flow -u <url> [[[-w 50 -c 100 -t 8] -w 100 -c 150 -t 16] -w 150 -c 200 -t 24]
+	[-h][-v][-x][-i itemName]
+
+Plugin queries API to get data. If no thresholds are set, plugin will
+easily monitor the items count to chart it. If there is one threshold, it will
+be used no matter what time it is (the time identifier can be omitted in this
+case). If there are more of them, the threshold values apply until '-t' time
+occurs. Then the next one is used; if there are none to the end of the day,
+the first one after midnight is used. Some rules:
+-The order of thresholds definiton doesn't matter.
+-If more threholds share the same time, the last one overwrites all of them.
+-Thresholds have to be defined as trio - all the excessive ones are discarded
+	(with an exception of one threshold per day - time id is not needed then)
+-In the usage example the first thresholds apply from 00:00 GMT to 08:00 GMT etc.
+	Options:
+	-w, --warn
+	Set one of the warning thresholds
+	-c, --crit
+	Set one of the critical thresholds
+	-t, --time
+	Set GMT time in preciseness of hours defining until when
+	the previously defined thresholds apply
+	-h, --help
+	Get this help message
+	-v, --verbose
+	Get more verbose plugin output (= for debugging or time thr. verification)
+	-u, --url
+	URL to query
+	-x, --exactnum
+	Do not expect the output to be JSON encoded; if this parameter is present,
+	the API has to return just a number without any stringification
+	-i, --iname
+	Specify custom item name in singular form; default = 'item'
+
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+

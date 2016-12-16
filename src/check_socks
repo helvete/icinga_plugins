@@ -1,0 +1,110 @@
+#!/usr/bin/perl -w
+# plugin to check socks5 proxy using curl
+# feel free to change it
+# v0.1 2013-03-07 martin.peka@bugweis.com
+# v0.2 2013-03-08 plugin rewritten to fetch a bunch of IPs each run 
+#   and to compare them for a preset ration of uniqueness.
+use strict;
+
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $query;
+my $limit;
+my @address;
+my $verbose;
+my $proxy;
+my $port;
+my $output;
+
+# status code definition for exitcode purposes
+my %STATUS_CODE =
+  ( 'UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2' );
+
+# startup options
+my $status = GetOptions(
+	"h|help"        => \$opt_h,
+	"l|limit=i"     => \$limit,
+	"v|verbose"	=> \$verbose,
+	"x|proxyip=s"	=> \$proxy,
+	"r|proxyport=s"	=> \$port
+);
+
+# started with no options or without temp file path -> get help
+if ( $status == 0 or $opt_h or !$proxy or !$port or !$limit) {
+	print_usage();
+	exit $STATUS_CODE{'OK'};
+}
+# fetch 3 * limit IP addresses
+for (my $i = 0; $i < ($limit*3); $i++){
+	$address[$i] = getAddress();
+	if($verbose){
+		print $address[$i]."\n";
+	}
+}
+
+# get a count of unique IPs within the pool
+my $unique = getUniqCount(@address);
+
+# decide the status acording to uniqueness
+if($unique < ($limit/2)){
+	$output = 'CRITICAL';
+}else{
+	$output = 'OK';
+}
+# print the status out	
+print "$output: $unique unique IPs within ". $limit*3 ." attempts | unique_IPs=$unique;;". $limit/2  .";0;$limit\n";
+# and terminate
+exit $STATUS_CODE{$output};
+# function to fetch single IP address
+sub getAddress{
+	# assemble query
+	$query = "curl -s --socks5 $proxy:$port www.calman.eu/showip.php";
+	# execute query and save its output
+	$query = `$query`;
+	# parse the output
+	my @parsedOutput = split / /, $query;
+	# catching parse problems
+	unless(defined $parsedOutput[3]){
+		print "Problem with parsing curl ouptut!\n";
+		exit $STATUS_CODE{'UNKNOWN'};
+	}	
+	my $return = $parsedOutput[3];
+}
+
+# function for getting count of unique IPs within the pool
+sub getUniqCount {
+	my %hash  = map { $_, 1 } @_;
+	my $size = keys %hash;
+}
+
+# function for printing help
+sub print_usage {
+	print <<EOU;
+
+Usage: ./check_socks -l 20 -x 127.0.0.1 -p 999 [-h][-v]
+
+Plugin runs a curl query through a socks5 proxy to a "tell-me-my-IP" site. 
+It fetches 'limit'*3 IP addresses and determines whether there is at least
+'limit'/2 unique ones among them. If there is less unique IPs in the pool, 
+CRITICAL status is returned.
+
+    Options:
+    -l, --limit
+	IP pool size; default = 5
+    -h, --help
+	Get this help message
+    -v, --verbose
+	Get more verbose plugin output
+    -x, --proxyip
+	SOCKS5 proxy IP address
+    -r, --proxyport
+	SOCKS5 proxy port
+
+EOU
+
+	exit( $STATUS_CODE{"UNKNOWN"} );
+}
+
+
