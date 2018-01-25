@@ -1,0 +1,93 @@
+#!/usr/bin/perl -w
+# plugin for checking capacity of water activity services
+# supply -h param to get help
+
+use strict;
+use Scalar::Util qw(looks_like_number);
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $url;
+
+my $output = "OK";
+my $message = '';
+my $perf0 = '| pool=';
+my $perf1 = ' sauna=';
+
+my $pageContents;
+my @chunks;
+
+my @data;
+
+my %STATUS_CODE =
+	('UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1', 'CRITICAL' => '2');
+
+my $status = GetOptions(
+	"h|help"	=> \$opt_h,
+	"u|url=s"	=> \$url,
+);
+
+if ($opt_h || !defined $url) {
+	print_usage();
+	exit $STATUS_CODE{'UNKNOWN'};
+}
+
+$pageContents = getResponse($url);
+
+@chunks = split /počet návštěvníku/, $pageContents;
+
+# TODO: refactor
+my $iter = 0;
+foreach my $item (@chunks) {
+	if ($iter != 0) {
+		my @temp = split /<\/tr>/, $item;
+		$item = $temp[0];
+		@temp = split /<\/td>/, $item;
+		foreach my $itemNest (@temp) {
+			next if ($itemNest eq '');
+			my @temp2 = split /<td>/, $itemNest;
+			$itemNest = $temp2[1];
+			push @data, $itemNest;
+		}
+	}
+	$iter++;
+}
+
+if (scalar @data == 2) {
+	$message = 'Alles in ordnung';
+	$perf0 .= $data[0] . ';;;0;';
+	$perf1 .= $data[1] . ';;;0;';
+} else {
+	$output = 'UNKNOWN';
+	$message = 'No data found';
+	$perf0 .= '-1;;;0;';
+	$perf1 .= '-1;;;0;';
+}
+
+print "$output: $message$perf0$perf1\n";
+
+exit($STATUS_CODE{$output});
+
+sub getResponse {
+	my $query = "wget -qO - \'". $url . "\'";
+	$query = `$query`;
+}
+
+sub print_usage {
+	print <<EOU;
+
+Usage: ./check_cb_wa_capacity -u <target-water-activities-page-URL>
+
+Plugin scrapes target URL for capacity of water activity services.
+Persons count in either pool and sauna is returned via performance data.
+
+	Options:
+	-h, --help
+	Get this help message
+	-u, --url
+	URL to query
+
+EOU
+	exit($STATUS_CODE{"UNKNOWN"});
+}
