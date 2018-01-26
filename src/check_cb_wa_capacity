@@ -55,9 +55,9 @@ foreach my $item (@chunks) {
 }
 
 if (scalar @data == 2) {
-	$message = 'Alles in ordnung';
+	$message = 'Alles in Ordnung';
 	$perf0 .= $data[0] . ';;;0;';
-	$perf1 .= $data[1] . ';;;0;';
+	$perf1 .= $data[1] . ';;;0;60';
 } else {
 	$output = 'UNKNOWN';
 	$message = 'No data found';
