@@ -35,28 +35,24 @@ if ($opt_h || !defined $url) {
 
 $pageContents = getResponse($url);
 
-@chunks = split /počet návštěvníku/, $pageContents;
+@chunks = split /Obsazenost/, $pageContents;
 
 # TODO: refactor
 my $iter = 0;
 foreach my $item (@chunks) {
 	if ($iter != 0) {
-		my @temp = split /<\/tr>/, $item;
-		$item = $temp[0];
-		@temp = split /<\/td>/, $item;
-		foreach my $itemNest (@temp) {
-			next if ($itemNest eq '');
-			my @temp2 = split /<td>/, $itemNest;
-			$itemNest = $temp2[1];
-			push @data, $itemNest;
-		}
+		my @temp = split /<span class="green-text">/, $item;
+		$item = $temp[1];
+		@temp = split /<\/span>/, $item;
+		push @data, $temp[0];
 	}
+    last if $iter > 1;
 	$iter++;
 }
 
 if (scalar @data == 2) {
 	$message = 'Alles in Ordnung';
-	$perf0 .= $data[0] . ';;;0;';
+	$perf0 .= $data[0] . ';;;0;1000';
 	$perf1 .= $data[1] . ';;;0;60';
 } else {
 	$output = 'UNKNOWN';
