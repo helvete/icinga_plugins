@@ -46,7 +46,7 @@ foreach my $item (@chunks) {
 		@temp = split /<\/span>/, $item;
 		push @data, $temp[0];
 	}
-    last if $iter > 1;
+	last if $iter > 1;
 	$iter++;
 }
 
