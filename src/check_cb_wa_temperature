@@ -1,0 +1,98 @@
+#!/usr/bin/perl -w
+# plugin for checking current temperature of water facilities and sauna
+# supply -h param to get help
+
+use strict;
+use Scalar::Util qw(looks_like_number);
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+use Mojo::DOM;
+
+my $opt_h;
+my $url;
+
+my $output = "UNKNOWN";
+
+my %poolTemps = (
+    'swimmers' => -1,
+    'kids' => -1,
+    'whirlpool_small' => -1,
+    'whirlpool_big' => -1,
+    'sauna_sweat_room' => -1,
+    'sauna_cooling_pool' => -1,
+);
+
+my @poolTempsKeys = (
+    'swimmers',
+    'kids',
+    'whirlpool_small',
+    'whirlpool_big',
+    'sauna_sweat_room',
+    'sauna_cooling_pool',
+);
+
+my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0');
+
+my $status = GetOptions(
+    "h|help"    => \$opt_h,
+    "u|url=s"   => \$url,
+);
+
+if ($opt_h || !defined $url) {
+    print_usage();
+    exit $STATUS_CODE{'UNKNOWN'};
+}
+
+my $dom = Mojo::DOM->new;
+$dom->parse(getResponse($url));
+for my $last_div ($dom->find('div[class*="intro-box-last"]')->each) {
+    next if $last_div->find('div[class*="intro-subheading"]')->first->content ne "Teploty";
+    for my $el ($last_div->find('p')->each) {
+        for my $temp (scrape_hard($el)) {
+            $poolTemps{shift @poolTempsKeys} = $temp;
+            $output = "OK";
+        }
+        last;
+    }
+}
+
+print "$output: Temperatures|";
+print map { "$_=$poolTemps{$_};;;;; " } keys %poolTemps;
+
+exit($STATUS_CODE{$output});
+
+sub getResponse {
+    my $query = "wget -qO - \'". $url . "\'";
+    $query = `$query`;
+}
+
+sub scrape_hard {
+    my $domPart = $_[0]->content;
+    my @result;
+    for my $p_row (split /<br>/, $domPart) {
+        for my $chunk (split / /, $p_row) {
+            next if $chunk !~ /^([0-9,]{2,4}).*$/;
+            push @result, $1 =~ s/,/./r;
+        }
+    }
+    @result = @result;
+}
+
+sub print_usage {
+    print <<EOU;
+
+Usage: ./check_cb_wa_temperature -u <target-water-activities-page-URL>
+
+Plugin scrapes target URL for temperature of water activity facilities.
+These are in celsius degrees
+
+    Options:
+    -h, --help
+    Get this help message
+    -u, --url
+    URL to query
+
+EOU
+    exit($STATUS_CODE{"UNKNOWN"});
+}
