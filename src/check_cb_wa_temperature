@@ -31,6 +31,7 @@ my @poolTempsKeys = (
     'sauna_sweat_room',
     'sauna_cooling_pool',
 );
+my @poolTempsKeys2 = @poolTempsKeys;
 
 my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0');
 
@@ -58,7 +59,9 @@ for my $last_div ($dom->find('div[class*="intro-box-last"]')->each) {
 }
 
 print "$output: Temperatures|";
-print map { "$_=$poolTemps{$_};;;;; " } keys %poolTemps;
+for my $ordered (@poolTempsKeys2) {
+    print "$ordered=$poolTemps{$ordered};;;;; "
+}
 
 exit($STATUS_CODE{$output});
 
