@@ -1,0 +1,63 @@
+#!/usr/bin/perl -w
+# plugin for checking current temperature of water facilities and sauna
+# supply -h param to get help
+
+use strict;
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+my $opt_h;
+my $ip;
+
+my $output = "UNKNOWN";
+
+my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0', 'WARNING' => '1');
+
+my $status = GetOptions(
+    "h|help"    => \$opt_h,
+    "i|ip=s"   => \$ip,
+);
+
+if ($opt_h || !defined $ip) {
+    print_usage();
+    exit $STATUS_CODE{'UNKNOWN'};
+}
+
+my $perf = '0;;;;;';
+$output = 'UNKNOWN';
+my $realIp = getResponse('https://zhouba.cz/ip/');
+if ($realIp ne $ip) {
+    $output = 'WARNING';
+    $perf = '2;;;;;';
+} elsif ($realIp eq $ip) {
+    $output = 'OK';
+    $perf = '1;;;;;';
+}
+
+print "$output: IP (Lucky=1, T-Mo=2)|$perf";
+
+exit($STATUS_CODE{$output});
+
+sub getResponse {
+    my $query = "wget -qO - \'". $_[0] . "\'";
+    $query = `$query`;
+}
+
+sub print_usage {
+    print <<EOU;
+
+Usage: ./check_office_ip -i <office-ip>
+
+Plugin scrapes IP detection service and compares it with with and IP address
+the main office ISP should provide. In case of discrepancy we know fallback to
+4G is undergoing.
+
+    Options:
+    -h, --help
+    Get this help message
+    -i, --ip
+    Office IP address
+
+EOU
+    exit($STATUS_CODE{"UNKNOWN"});
+}
