@@ -55,7 +55,7 @@ print "$output: Stats|total=$total;;;;; deaths=$deaths;;;;; cured=$cured;;;;;";
 exit($STATUS_CODE{$output});
 
 sub getResponse {
-    my $query = "wget -qO - \'". $url . "\'";
+    my $query = "wget -qO - \'". $_[0] . "\'";
     $query = `$query`;
 }
 
