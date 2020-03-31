@@ -1,0 +1,80 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Getopt::Long;
+&Getopt::Long::config('bundling');
+
+use Mojo::DOM;
+
+my $opt_h;
+my $url;
+my $country_string;
+
+my $output = "UNKNOWN";
+
+my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0');
+
+my $status = GetOptions(
+    "h|help"    => \$opt_h,
+    "u|url=s"   => \$url,
+    "c|country-string=s"   => \$country_string,
+);
+
+if ($opt_h || !defined $url || !defined $country_string) {
+    print_usage();
+    exit $STATUS_CODE{'UNKNOWN'};
+}
+my $total;
+my $deaths;
+my $cured;
+
+my $dom = Mojo::DOM->new;
+$dom->parse(getResponse($url));
+my $table = $dom->find('table#main_table_countries_today');
+for my $row ($table->first->find('tr')->each) {
+    next unless $row->find('td')->first;
+    next if $row->find('td')->first->content ne $country_string;
+    my $iter = 0;
+    for my $el ($row->find('td')->each) {
+        my $content = $el->content =~ s/,//r;
+        if ($iter == 1) {
+            $total = $content =~ s/^\s+|\s+$//r;
+        } elsif ($iter == 3) {
+            $deaths = $content =~ s/^\s+|\s+$//r;
+        } elsif ($iter == 5) {
+            $cured = $content =~ s/^\s+|\s+$//r;
+        }
+        ++$iter;
+        $output = 'OK';
+    }
+    last;
+}
+
+exit($STATUS_CODE{$output}) unless $output eq 'OK';
+print "$output: Stats|total=$total;;;;; deaths=$deaths;;;;; cured=$cured;;;;;";
+exit($STATUS_CODE{$output});
+
+sub getResponse {
+    my $query = "wget -qO - \'". $url . "\'";
+    $query = `$query`;
+}
+
+sub print_usage {
+    print <<EOU;
+
+Usage: ./check_corona_stats -u <target-URL> -c CountryName
+
+Plugin scrapes target URL for corona stats
+These are in number of cases
+
+    Options:
+    -h, --help
+    Get this help message
+    -u, --url
+    URL to query
+    -c, --country-string
+    URL to query
+
+EOU
+    exit($STATUS_CODE{"UNKNOWN"});
+}
