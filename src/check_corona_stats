@@ -1,32 +1,25 @@
 #!/usr/bin/perl -w
 
 use strict;
+use Mojo::DOM;
 use Getopt::Long;
 &Getopt::Long::config('bundling');
 
-use Mojo::DOM;
-
-my $opt_h;
-my $url;
-my $country_string;
-
-my $output = "UNKNOWN";
-
 my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0');
 
-my $status = GetOptions(
-    "h|help"    => \$opt_h,
-    "u|url=s"   => \$url,
-    "c|country-string=s"   => \$country_string,
+my ($opt_h, $url, $country_string);
+GetOptions(
+    "h|help" => \$opt_h,
+    "u|url=s" => \$url,
+    "c|country-string=s" => \$country_string,
 );
 
 if ($opt_h || !defined $url || !defined $country_string) {
     print_usage();
-    exit $STATUS_CODE{'UNKNOWN'};
 }
-my $total;
-my $deaths;
-my $cured;
+
+my $output = "UNKNOWN";
+my ($total, $deaths, $cured) = (-1) x 3;
 
 my $dom = Mojo::DOM->new;
 $dom->parse(getResponse($url));
@@ -36,13 +29,14 @@ for my $row ($table->first->find('tr')->each) {
     next if $row->find('td')->first->content ne $country_string;
     my $iter = 0;
     for my $el ($row->find('td')->each) {
-        my $content = $el->content =~ s/,//r;
+        my $content = $el->content =~ s/,//r =~ s/^\s+|\s+$//r;
         if ($iter == 1) {
-            $total = $content =~ s/^\s+|\s+$//r;
+            $total = $content;
         } elsif ($iter == 3) {
-            $deaths = $content =~ s/^\s+|\s+$//r;
+            $deaths = $content;
         } elsif ($iter == 5) {
-            $cured = $content =~ s/^\s+|\s+$//r;
+            $cured = $content;
+            last;
         }
         ++$iter;
         $output = 'OK';
@@ -50,22 +44,22 @@ for my $row ($table->first->find('tr')->each) {
     last;
 }
 
-exit($STATUS_CODE{$output}) unless $output eq 'OK';
 print "$output: Stats|total=$total;;;;; deaths=$deaths;;;;; cured=$cured;;;;;";
 exit($STATUS_CODE{$output});
 
 sub getResponse {
-    my $query = "wget -qO - \'". $_[0] . "\'";
+    my $scrape_url = shift;
+    my $query = "wget -qO - \'". $scrape_url . "\'";
     $query = `$query`;
 }
 
 sub print_usage {
-    print <<EOU;
+    print <<EOF;
 
-Usage: ./check_corona_stats -u <target-URL> -c CountryName
+Usage: $0 -u <target-URL> -c <country-name>
 
-Plugin scrapes target URL for corona stats
-These are in number of cases
+Plugin scrapes target URL for corona stats.
+Units are numbers of cases
 
     Options:
     -h, --help
@@ -73,8 +67,8 @@ These are in number of cases
     -u, --url
     URL to query
     -c, --country-string
-    URL to query
+    Name of a country of interest. Must be exact contents of given table cell
 
-EOU
+EOF
     exit($STATUS_CODE{"UNKNOWN"});
 }
