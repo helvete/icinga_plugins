@@ -26,7 +26,8 @@ $dom->parse(getResponse($url));
 my $table = $dom->find('table#main_table_countries_today');
 for my $row ($table->first->find('tr')->each) {
     next unless $row->find('td')->first;
-    next if $row->find('td')->first->content ne $country_string;
+    next unless $row->find('td')->first->find('a')->first;
+    next if $row->find('td')->first->find('a')->first->content ne $country_string;
     my $iter = 0;
     for my $el ($row->find('td')->each) {
         my $content = $el->content =~ s/,//r =~ s/^\s+|\s+$//r;
