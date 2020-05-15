@@ -26,25 +26,26 @@ $dom->parse(getResponse($url));
 my $table = $dom->find('table#main_table_countries_today');
 for my $row ($table->first->find('tr')->each) {
     next unless $row->find('td')->first;
-    next unless $row->find('td')->first->find('a')->first;
-    next if $row->find('td')->first->find('a')->first->content ne $country_string;
     my $iter = 0;
     for my $el ($row->find('td')->each) {
-        my $content = $el->content =~ s/,//r =~ s/^\s+|\s+$//r;
         if ($iter == 1) {
+            last unless $el->find('a')->first;
+            last if $el->find('a')->first->content ne $country_string;
+        }
+        my $content = $el->content =~ s/,//r =~ s/^\s+|\s+$//r;
+        if ($iter == 2) {
             $total = $content;
-        } elsif ($iter == 3) {
+        } elsif ($iter == 4) {
             $deaths = $content;
-        } elsif ($iter == 5) {
+        } elsif ($iter == 6) {
             $cured = $content;
             last;
         }
         ++$iter;
         $output = 'OK';
     }
-    last;
+    last if $iter == 6;
 }
-
 print "$output: Stats|total=$total;;;;; deaths=$deaths;;;;; cured=$cured;;;;;";
 exit($STATUS_CODE{$output});
 
