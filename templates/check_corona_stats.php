@@ -3,7 +3,7 @@
 # check_corona_stats.pl PNP4Nagios template
 # v0.1 2020-04-30
 #
-$opt[1] = "--title \"Statistics for $servicedesc\" -l 0";
+$opt[1] = "--title \"Statistics for $servicedesc\" -l -1";
 
 $def[1] = "DEF:$ACT[1]=$RRDFILE[1]:$DS[1]:AVERAGE ";
 $def[1] .= "AREA:$ACT[1]#838383:\"$NAME[1]\t\" ";
