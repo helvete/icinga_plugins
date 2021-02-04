@@ -32,7 +32,7 @@ for my $row ($table->first->find('tr')->each) {
             last unless $el->find('a')->first;
             last if $el->find('a')->first->content ne $country_string;
         }
-        my $content = $el->content =~ s/,//r =~ s/^\s+|\s+$//r;
+        my $content = $el->content =~ s/,//gr =~ s/^\s+|\s+$//r;
         if ($iter == 2) {
             $total = $content;
         } elsif ($iter == 4) {
