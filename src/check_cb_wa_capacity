@@ -3,6 +3,7 @@
 # supply -h param to get help
 
 use strict;
+use Mojo::DOM;
 use Scalar::Util qw(looks_like_number);
 use Getopt::Long;
 &Getopt::Long::config('bundling');
@@ -32,42 +33,31 @@ if ($opt_h || !defined $url) {
 	print_usage();
 	exit $STATUS_CODE{'UNKNOWN'};
 }
+$url = "$url/" unless substr($url, -1) eq "/";
 
-$pageContents = getResponse($url);
-
-@chunks = split /Obsazenost/, $pageContents;
-
-# TODO: refactor
-my $iter = 0;
-foreach my $item (@chunks) {
-	if ($iter != 0) {
-		my @temp = split /<span class="green-text">/, $item;
-		$item = $temp[1];
-		@temp = split /<\/span>/, $item;
-		push @data, $temp[0];
-	}
-	last if $iter > 1;
-	$iter++;
-}
-
-if (scalar @data == 2) {
-	$message = 'Alles in Ordnung';
-	$perf0 .= $data[0] . ';;;0;1000';
-	$perf1 .= $data[1] . ';;;0;60';
-} else {
-	$output = 'UNKNOWN';
-	$message = 'No data found';
-	$perf0 .= '-1;;;0;';
-	$perf1 .= '-1;;;0;';
-}
+$message = 'Alles in Ordnung';
+$perf0 .= perf_line(parse_route('plavecky-stadion'));
+$perf1 .= perf_line(parse_route('sauna'));
 
 print "$output: $message$perf0$perf1\n";
 
 exit($STATUS_CODE{$output});
 
 sub getResponse {
-	my $query = "wget -qO - \'". $url . "\'";
+	my $query = "wget -qO - \'". shift . "\'";
 	$query = `$query`;
+}
+
+sub parse_route {
+    my $dom = Mojo::DOM->new;
+    $dom->parse(getResponse($url . shift));
+    my $component_parent = $dom->find('div#snippet-widget-panel1-widgetsnippet');
+    my $ratio_container = $component_parent->first->find('div.panel-ratio');
+    my @result = split ' / ', $ratio_container->first->content;
+}
+
+sub perf_line {
+    my $perf = shift . ";;;0;" . shift;
 }
 
 sub print_usage {
