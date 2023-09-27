@@ -53,7 +53,9 @@ sub parse_route {
     $dom->parse(getResponse($url . shift));
     my $component_parent = $dom->find('div#snippet-widget-panel1-widgetsnippet');
     my $ratio_container = $component_parent->first->find('div.panel-ratio');
-    my @result = split ' / ', $ratio_container->first->content;
+
+    return (0, 0) unless defined $ratio_container->first;
+    return split ' / ', $ratio_container->first->content;
 }
 
 sub perf_line {
