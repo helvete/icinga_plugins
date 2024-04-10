@@ -1,0 +1,41 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Mojo::DOM;
+
+my $url = 'https://www.hvezdarnacb.cz/cz/kalendar-akci';
+my %STATUS_CODE = ('UNKNOWN' => '3', 'OK' => '0', 'CRITICAL' => '2');
+
+sub get_response {
+	my $query = "wget -qO - \'". shift . "\'";
+	$query = `$query`;
+}
+
+sub latest_event_id {
+    my $dom = Mojo::DOM->new;
+    $dom->parse(get_response $url);
+    my $component_parent = $dom->find('div#data');
+    my $cal_events = $component_parent->first->find('div.cast2');
+    my @cal_ids = $cal_events->map(attr => 'id')->each;
+    my $max_id;
+    for my $id (reverse sort @cal_ids) {
+        return $id;
+    }
+    return '';
+}
+
+sub previous_event_id {
+    my $val = `cat /tmp/observatory_previous_id`;
+    chomp $val;
+    return $val;
+}
+
+my $last_id = latest_event_id;
+my $previous_id = previous_event_id;
+
+if ($last_id eq $previous_id) {
+    print "OK: No calendar change";
+    exit($STATUS_CODE{'OK'});
+}
+print "CRITICAL: Calendar updated!";
+exit($STATUS_CODE{'CRITICAL'});
