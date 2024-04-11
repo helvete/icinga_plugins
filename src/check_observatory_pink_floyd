@@ -17,9 +17,12 @@ sub latest_event_id {
     my $component_parent = $dom->find('div#data');
     my $cal_events = $component_parent->first->find('div.cast2');
     my @cal_ids = $cal_events->map(attr => 'id')->each;
-    for my $id (reverse sort @cal_ids) {
-        return $id;
+    my $latest_id = 0;
+    for my $id (@cal_ids) {
+        $id =~ s/k//g;
+        $latest_id = $id if $id > $latest_id;
     }
+    return "k$latest_id";
 }
 
 sub previous_event_id {
