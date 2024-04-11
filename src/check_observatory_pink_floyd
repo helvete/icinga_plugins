@@ -38,5 +38,5 @@ if ($last_id eq $previous_id) {
     print "OK: No calendar change";
     exit($STATUS_CODE{'OK'});
 }
-print "CRITICAL: Calendar updated!";
+print "CRITICAL: Calendar updated! Latest ID: $last_id";
 exit($STATUS_CODE{'CRITICAL'});
